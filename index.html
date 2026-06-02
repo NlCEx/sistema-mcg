@@ -457,8 +457,47 @@ function carregar(){
   // garante campos de entrega nas vendas antigas
   (state.vendas||[]).forEach(function(v){ if(!v.status) v.status='Entregue'; if(!v.mot) v.mot='—'; if(!v.dataEnt) v.dataEnt=v.data; });
 }
-function salvar(){ try{ localStorage.setItem('pomar_state', JSON.stringify(state)); }catch(e){} }
+function salvar(){ try{ localStorage.setItem('pomar_state', JSON.stringify(state)); }catch(e){} salvarNuvem(); }
 carregar();
+
+// ── NUVEM (Apps Script) — dados compartilhados entre os aparelhos ──
+var API_URL = 'https://script.google.com/macros/s/AKfycbyIZBxWuQfdgA60b5eXR7ENTsyEc2BB2fBHSezTFU6yvaOYsXgvT8EGu-qru3pltV8x/exec';
+function _dadosState(){ return {produtos:state.produtos,veiculos:state.veiculos,compras:state.compras,vendas:state.vendas,contas:state.contas,metaLucro:state.metaLucro,prox:state.prox}; }
+var _saveTimer=null;
+function salvarNuvem(){
+  if(!API_URL) return;
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(function(){
+    try{ fetch(API_URL,{method:'POST',mode:'no-cors',body:JSON.stringify(_dadosState())}); }catch(e){}
+  },600);
+}
+function carregarNuvem(cb){
+  if(!API_URL){ if(cb)cb(); return; }
+  window._mcgCarregou=function(d){
+    window._mcgTeveDados = !!(d && d.produtos);
+    try{
+      if(d && d.produtos){
+        ['produtos','veiculos','compras','vendas','contas','prox'].forEach(function(k){ if(d[k]!=null) state[k]=d[k]; });
+        if(d.metaLucro!=null) state.metaLucro=d.metaLucro;
+        try{ localStorage.setItem('pomar_state', JSON.stringify(state)); }catch(e){}
+      }
+    }catch(e){}
+    if(cb)cb();
+  };
+  var s=document.createElement('script');
+  s.onerror=function(){ if(cb)cb(); };
+  s.src=API_URL+'?callback=_mcgCarregou&t='+Date.now();
+  document.body.appendChild(s);
+  setTimeout(function(){ if(s.parentNode) s.parentNode.removeChild(s); },15000);
+}
+var _pollTimer=null;
+function iniciarPolling(){
+  if(_pollTimer) return;
+  _pollTimer=setInterval(function(){
+    if(document.querySelector('.modal-overlay.open')) return;
+    carregarNuvem(function(){ if(state.user) renderAll(); });
+  },15000);
+}
 
 // ── HELPERS ────────────────────────────────────────────────────────
 function money(v){ return 'R$ ' + (v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -509,6 +548,8 @@ function login(nome){
   document.getElementById('role-label').textContent=u.papel;
   renderAll();
   toast('Bem-vindo, '+nome+'!','success');
+  carregarNuvem(function(){ if(!window._mcgTeveDados){ salvarNuvem(); } renderAll(); });
+  iniciarPolling();
 }
 
 // ── NAV ────────────────────────────────────────────────────────────
